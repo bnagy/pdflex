@@ -79,7 +79,7 @@ $ go get -u github.com/bnagy/pdflex/cmd/pdftok
 
 ## TODO
 
-I lexed a bunch of the Adobe Engineering test files (eg from [here](http://acroeng.adobe.com/wp/?page_id=10)) and put the Literal Name tokens in [toks.txt](toks.txt). These should be further curated (by hand) and used to augment a PDF token dictionary. That dictionary would then be useful for fuzzing practitioners.
+I lexed a bunch of the Adobe Engineering test files (eg from [here](http://acroeng.adobe.com/wp/?page_id=10)) and put the Literal Name tokens in [tok_raw.txt](toks_raw.txt). These have been further curated (by hand) in [tok_curated.txt](toks_curated.txt) - I am using these to augment my AFL PDF dictionary.
 
 ## Contributing
 
