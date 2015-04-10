@@ -265,14 +265,38 @@ func lexDefault(l *Lexer) stateFn {
 // lexStream quickly skips over all the contents of PDF stream objects. The
 // 'stream' header has already been consumed and emitted in lexWord.
 func lexStream(l *Lexer) stateFn {
+
+	// emit a space token for the space(s) terminating the stream marker
+	if !unicode.IsSpace(l.peek()) {
+		return l.errorf("expected space terminator for stream keyword, got: %#U", l.peek())
+	}
+	for unicode.IsSpace(l.peek()) {
+		l.next()
+	}
+
+	l.emit(ItemSpace)
 	i := strings.Index(l.input[l.pos:], rightStream)
 	if i < 0 {
 		return l.errorf("unclosed stream")
 	}
-	l.pos += Pos(i)
+
+	substr := l.input[l.pos : l.pos+Pos(i)]
+
+	for {
+		// un-emit any trailing space chars at the end of the stream data,
+		// immediately before the endstream marker.
+		r, size := utf8.DecodeLastRuneInString(substr)
+		if !unicode.IsSpace(r) || len(substr) <= 0 {
+			break
+		}
+		substr = substr[:len(substr)-size]
+	}
+
+	l.pos += Pos(len(substr))
 	l.emit(ItemStreamBody)
-	l.pos += Pos(len(rightStream))
-	l.emit(ItemEndStream)
+
+	// let lexDefault lex the space and the endstream token
+
 	return lexDefault
 }
 
