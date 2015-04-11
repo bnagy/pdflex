@@ -33,7 +33,7 @@ pdflex.Item{Typ:13, Pos:62, Val:"R"}
 [...]
 ```
 
-Obviously you can `grep` `sed` `cut` or whatever. If you're a Go user, the lexing API is dirt simple ( check [main.go](main.go) ) if you want to do something cooler. If you do, shoot me a PR.
+Obviously you can `grep` `sed` `cut` or whatever. If you're a Go user, the lexing API is dirt simple ( check [pdftok/main.go](pdftok) ) if you want to do something cooler. If you do, shoot me a PR.
 
 Token types (EOF -> 1, ItemNumber -> 2 etc):
 ```go
@@ -72,14 +72,14 @@ const (
 You should follow the [instructions](https://golang.org/doc/install) to
 install Go, if you haven't already done so.
 
-Now, install pdftok:
+Now, install eg pdftok:
 ```bash
 $ go get -u github.com/bnagy/pdflex/cmd/pdftok
 ```
 
 ## TODO
 
-I lexed a bunch of the Adobe Engineering test files (eg from [here](http://acroeng.adobe.com/wp/?page_id=10)) and put the Literal Name tokens in [toks_raw.txt](toks_raw.txt). These have been further curated (by hand) in [toks_curated.txt](toks_curated.txt) - I am using these to augment my AFL PDF dictionary.
+I lexed a bunch of the Adobe Engineering test files (eg from [here](http://acroeng.adobe.com/wp/?page_id=10)) and put the Literal Name tokens in [toks_raw.txt](toks_raw.txt). These have been further curated (by hand) in [toks_curated.txt](toks_curated.txt) - I am using these to augment my AFL PDF dictionary. You will need to write your own script to emit each line as a file, which AFL requires.
 
 ## Contributing
 
