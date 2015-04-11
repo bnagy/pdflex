@@ -77,6 +77,12 @@ Now, install eg pdftok:
 $ go get -u github.com/bnagy/pdflex/cmd/pdftok
 ```
 
+## Tools
+
+`pdftok` just emits the raw lexed stream of tokens, write your own parser on top if you like
+
+`pdfshrink` brutally truncates the contents of pdf `stream` objects. The idea is that this will shrink PDF files so that they can be used for fuzzing. The files will be invalid/corrupt in assorted ways, but hopefully not corrupt enough that parsers won't be able to open them.
+
 ## TODO
 
 I lexed a bunch of the Adobe Engineering test files (eg from [here](http://acroeng.adobe.com/wp/?page_id=10)) and put the Literal Name tokens in [toks_raw.txt](toks_raw.txt). These have been further curated (by hand) in [toks_curated.txt](toks_curated.txt) - I am using these to augment my AFL PDF dictionary. You will need to write your own script to emit each line as a file, which AFL requires.
