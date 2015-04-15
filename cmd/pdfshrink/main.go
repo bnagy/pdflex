@@ -281,7 +281,6 @@ func main() {
 
 		fixed := fixXrefs(out.Bytes())
 		newfn := strings.TrimSuffix(path.Base(arg), path.Ext(arg)) + "-small" + path.Ext(arg)
-		fmt.Println(newfn)
 		newfn = path.Join(path.Dir(arg), newfn)
 		err = ioutil.WriteFile(newfn, fixed, 0600)
 		if err != nil {

@@ -317,6 +317,10 @@ func lexComment(l *Lexer) stateFn {
 	var r rune
 	for !isEndOfLine(l.peek()) {
 		r = l.next()
+		if r == eof {
+			l.emit(ItemComment)
+			return lexDefault
+		}
 	}
 
 	// any single EOL marker has been consumed above. Check for CRLF.
