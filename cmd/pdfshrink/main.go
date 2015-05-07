@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"compress/zlib"
 	"encoding/ascii85"
@@ -30,101 +29,342 @@ var (
 	flagMax    *int  = flag.Int("max", MAXDATA, "Trim streams whose size is greater than this value")
 )
 
-func fixStartXref(in []byte) []byte {
+type parseState int
 
-	sxrIdx := bytes.LastIndex(in, startxref)
-	if sxrIdx < 0 {
-		return in
-	}
+const (
+	outside parseState = iota
+	inside
+	eof
+)
 
-	xrIdx := bytes.LastIndex(in[:sxrIdx], xref)
-	if xrIdx < 0 {
-		return in
-	}
+// Spec: 7.5.5 - 7.5.6
+// Section Header rows are Offset, count
+// 'f' is free 'n' is live object
+// Object entries are specified as exactly 20 bytes.
+// [0-9]{10} [0-9]{5} [fn] \r\n
+// 8 1 <- one entry expected, Offset 8
+// 0000037413 00000 n <- object 8
+// 10 1
+// 0000037503 00000 n <- object 10
+// 12 2
+// 0000037629 00000 n
+// 0000037791 00000 n <- object 13
+// 15 1
+// 0000037931 00000 n
+//
+// Multiple xref sections can appear in one file, covering from the last %%EOF
+// to the %%EOF after the end of the trailer
 
-	scratch := []byte{}
-	scratch = append(scratch, in[:sxrIdx]...)
-	scratch = append(scratch, []byte(fmt.Sprintf("startxref\n%d\n%%%%EOF", xrIdx))...)
-	return scratch
+// Parser represents the state of the input parser
+type Parser struct {
+	From     int // range of whole input buffer this xref covers
+	LastXref int //
+	Idx      int // Object Index of the current object
+	Offset   int // Header Section Offset
+	Entries  int // Number of object entries for this section
+	*pdflex.Lexer
+	State   parseState
+	Scratch bytes.Buffer
 }
 
-func fixXrefs(in []byte) []byte {
+// Row represents one object entry in an xrefs section
+type Row struct {
+	Offset     int
+	Generation int
+	Active     bool
+}
 
-	out := new(bytes.Buffer)
-	tr := bytes.LastIndex(in, trailer)
-	xr := bytes.LastIndex(in[:tr], xref)
-	if xr < 0 || tr < 0 || tr < xr {
-		return in
+// FindXref parses forward until it finds an xref token, emitting all seen
+// tokens to scratch. It is responsible for maintaining the 'to' parser member
+// which records the start of the most recent xref section and the 'inside'
+// struct member which is a sanity check to verify when we think we're in the
+// middle of parsing an xrefs.
+func (p *Parser) FindXref() bool {
+	if p.State == eof {
+		return false
 	}
-	xrSection := in[xr:tr]
-
-	// Try to normalize the xrefs so lines are delimited by one \n. This works
-	// for \n, \r, \r\n...
-	normalized := strings.Replace(string(xrSection), "\r", "\n", -1)
-	normalized = strings.Replace(normalized, "\n\n", "\n", -1)
-
-	// Validate / parse the header rows
-	scanner := bufio.NewScanner(strings.NewReader(normalized))
-	scanner.Scan()
-	ff := strings.Fields(scanner.Text())
-	if ff[0] != "xref" {
-		if *flagStrict {
-			log.Fatalf("[STRICT] Corrupt xref section\n%#v\n", string(xrSection))
+	if p.State != outside {
+		panic("[BUG] FindXref() called while still in an xref")
+	}
+	for i := p.NextItem(); i.Typ != pdflex.ItemEOF; i = p.NextItem() {
+		p.Scratch.WriteString(i.Val)
+		if i.Typ == pdflex.ItemXref {
+			p.State = inside
+			p.LastXref = int(i.Pos)
+			return true
 		}
-		return in
 	}
-	fmt.Fprintln(out, scanner.Text())
-	scanner.Scan()
-	ff = strings.Fields(scanner.Text())
-	if len(ff) < 2 {
-		if *flagStrict {
-			log.Fatalf("[STRICT] Corrupt xref section\n%#v\n", string(xrSection))
-		}
-		return in
+	p.State = eof
+	return false
+}
+
+// FindRow parses and consumes one object entry in an xref section. It does NOT
+// consume the trailing EOL marker. If the row is unable to be parsed, it will
+// emit all seen tokens to scratch before returning an error.
+func (p *Parser) FindRow() (r Row, e error) {
+	// Save the contents of all tokens we evaluate so we can write them out if
+	// we have to abort
+	bailout := ""
+
+	i, ok := p.CheckToken(pdflex.ItemNumber, false)
+	bailout += i.Val
+	if !ok || len(i.Val) != 10 {
+		e = fmt.Errorf("Corrupt row")
+		p.Scratch.WriteString(bailout)
+		return
 	}
-	expected, err := strconv.Atoi(ff[1])
-	if err != nil {
-		if *flagStrict {
-			log.Fatalf("[STRICT] Corrupt xref section\n%#v\n", string(xrSection))
-		}
-		return in
+	r.Offset, _ = strconv.Atoi(i.Val)
+
+	i, ok = p.CheckToken(pdflex.ItemSpace, false)
+	bailout += i.Val
+	if !ok || len(i.Val) != 1 {
+		e = fmt.Errorf("Corrupt row")
+		p.Scratch.WriteString(bailout)
+		return
 	}
 
-	// Parse the xrefs entries and try to fix up indirect ref offsets
-	for i := 0; i < expected; i++ {
-		if !scanner.Scan() {
-			if *flagStrict {
-				log.Fatalf("[STRICT] Short xref section\n")
+	i, ok = p.CheckToken(pdflex.ItemNumber, false)
+	bailout += i.Val
+	if !ok || len(i.Val) != 5 {
+		e = fmt.Errorf("Corrupt row")
+		p.Scratch.WriteString(bailout)
+		return
+	}
+	r.Generation, _ = strconv.Atoi(i.Val)
+
+	i, ok = p.CheckToken(pdflex.ItemSpace, false)
+	bailout += i.Val
+	if !ok || len(i.Val) != 1 {
+		e = fmt.Errorf("Corrupt row")
+		p.Scratch.WriteString(bailout)
+		return
+	}
+
+	i, ok = p.CheckToken(pdflex.ItemWord, false)
+	bailout += i.Val
+	if !ok || len(i.Val) != 1 || !(i.Val == "n" || i.Val == "f") {
+		e = fmt.Errorf("Corrupt row")
+		p.Scratch.WriteString(bailout)
+		return
+	}
+	if i.Val == "n" {
+		r.Active = true
+	}
+
+	return
+}
+
+// CheckToken is used to check the type of the next token, returning the token
+// itself and a match boolean. If accept is true the token will be emitted to
+// scratch, whether or not the check matches.
+func (p *Parser) CheckToken(t pdflex.ItemType, accept bool) (pdflex.Item, bool) {
+	i := p.NextItem()
+	if accept {
+		p.Scratch.WriteString(i.Val)
+	}
+	return i, i.Typ == t
+
+}
+
+// ResetToHere aborts any xref parsing in progress, sets the xref-related
+// state values to -1 and sets 'from' to the current position. This is done so
+// that if another xref is encountered later ( which may not be corrupt ) the
+// search scope in the raw data will start from wherever the previous xref
+// parsing aborted.
+func (p *Parser) ResetToHere() {
+	p.State = outside
+	p.From = int(p.Pos())
+	p.LastXref, p.Idx, p.Offset, p.Entries = -1, -1, -1, -1
+}
+
+// SeemsLegit is a quick call to make sure none of the xref-related state
+// entries are set to their reset values.
+func (p *Parser) SeemsLegit() bool {
+	return !(p.LastXref < 0 ||
+		p.Idx < 0 ||
+		p.Offset < 0 ||
+		p.Entries < 0)
+}
+
+// FindHeader is called directly after an xref token, or after the end of a
+// section inside an xref. If tries to find EITHER a header row (Offset count
+// EOL) or the trailer keyword. If it finds a trailer it will advance to the
+// next %%EOF token, reset the state variables ready to find the next xref
+// ( if any ) and then return false.
+func (p *Parser) FindHeader() bool {
+	if p.State != inside {
+		p.ResetToHere()
+		return false
+	}
+
+	i := p.NextItem()
+	p.Scratch.WriteString(i.Val)
+	switch i.Typ {
+	case pdflex.ItemTrailer:
+		// no more headers in this section. Try to find and fix the startxref
+		// entry, and then reset to the outside state. Even if there is a
+		// missing %%EOF token we're not going to abort or anything...
+		for {
+			i, bad := p.CheckToken(pdflex.ItemEOF, true)
+			if bad {
+				p.State = eof
+				return false
 			}
-			return in
-		}
-		ff := strings.Fields(scanner.Text())
-		// Get indirect refs like 0000037118 00000 n
-		// Don't know what 0000000389 00001 f refs are
-		if ff[2] == "n" {
-			idx := -1
-			// Do it this way instead of using a regex, because the multi-line
-			// regexes / anchors seem wonky for PDFs that use \r as a "bare"
-			// line delimeter
-			idx = bytes.Index(in, []byte(fmt.Sprintf("\n%d 0 obj", i)))
-			if idx < 0 {
-				idx = bytes.Index(in, []byte(fmt.Sprintf("\r%d 0 obj", i)))
+
+			if i.Typ == pdflex.ItemStartXref {
+				if _, ok := p.CheckToken(pdflex.ItemEOL, true); !ok {
+					p.ResetToHere()
+					return false
+				}
+
+				// don't accept in this call to CheckToken, we might want to write
+				// a different number.
+				if i, ok := p.CheckToken(pdflex.ItemNumber, false); !ok {
+					p.Scratch.WriteString(i.Val)
+					p.ResetToHere()
+					return false
+				}
+				p.Scratch.WriteString(fmt.Sprintf("%d", p.LastXref)) // last xref Pos
+
+				// Next tokens should be ItemEOL then ItemComment %%EOF, but
+				// we don't actually care, let the general parsing loop emit
+				// them.
+				p.ResetToHere()
+				return false
 			}
-			if idx >= 0 {
-				fmt.Fprintf(out, "%.10d %s %s\n", idx, ff[1], ff[2])
-				continue
-			}
 		}
-		// Not an indirect ref OR couldn't find that obj declaration
-		// Emit this line unmodified
-		fmt.Fprintln(out, scanner.Text())
+
+	case pdflex.ItemNumber:
+
+		p.Offset, _ = strconv.Atoi(i.Val)
+
+		if _, ok := p.CheckToken(pdflex.ItemSpace, true); !ok {
+			p.ResetToHere()
+			return false
+		}
+
+		i, ok := p.CheckToken(pdflex.ItemNumber, true)
+		if !ok {
+			p.ResetToHere()
+			return false
+		}
+		p.Entries, _ = strconv.Atoi(i.Val)
+
+		if _, ok := p.CheckToken(pdflex.ItemEOL, true); !ok {
+			p.ResetToHere()
+			return false
+		}
+
+		p.Idx = p.Offset
+		if !p.SeemsLegit() {
+			panic("BUG: logic broken in FindHeader")
+		}
+
+		return true
+
+	case pdflex.ItemEOF:
+		p.State = eof
+		return false
+	default:
+		// we assume that this was a truncated xref section or something, so
+		// we'll report no header row found, but still set the "from" index.
+		// That means that if there's another xref later the search scope will
+		// be (hopefully correctly) from the end of this truncated / corrupt
+		// xrefs to the start of the next one.
+		p.ResetToHere()
+		return false
 	}
 
-	// Replace the xrefs with our modified version. The length might be
-	// slightly different if we squeezed one or more \r\n into \n.
-	final := append(in[:xr], out.Bytes()...)
-	final = append(final, in[tr:]...)
-	return fixStartXref(final)
+}
+
+// FixXrefs is the main parsing loop. Essentially it seeks to an xref token,
+// then loops through parsing the xref header rows and object entry rows. When
+// no more xref tokens are found runs through until the end of the file.
+func (p *Parser) FixXrefs(in []byte) []byte {
+mainLoop:
+	for {
+
+		found := p.FindXref()
+		if !found {
+			if p.State != eof {
+				// just checking...
+				panic("[BUG] No xref found but not at EOF!")
+			}
+			return p.Scratch.Bytes()
+		}
+
+		if _, ok := p.CheckToken(pdflex.ItemEOL, true); !ok {
+			p.ResetToHere()
+			continue mainLoop
+		}
+		// found a new xref section now ( this label just for clarity )
+		for p.FindHeader() {
+			// found a header - from, to, idx, Offset are set
+			for i := 0; i < p.Entries; i++ {
+
+				row, err := p.FindRow()
+				if err != nil {
+					p.ResetToHere()
+					continue mainLoop
+				}
+
+				if row.Active {
+					objOffset := locateObj(in[p.From:p.LastXref], p.Idx+i)
+					// no matching object, emit the row unmodified
+					if objOffset < 0 {
+						objOffset = row.Offset
+					} else {
+						// If we found it in a subslice, add the from index to
+						// get the true index from the start of the input.
+						objOffset += p.From
+					}
+					p.Scratch.WriteString(fmt.Sprintf("%.10d %.5d n", objOffset, row.Generation))
+				} else {
+					p.Scratch.WriteString(fmt.Sprintf("%.10d %.5d f", row.Offset, row.Generation))
+
+				}
+
+				// Correct line terminators are: SP CR, SP LF, or CRLF
+				// This makes a correct line exactly 20 bytes.
+				// Spec section 7.5.4 p 41
+				i, ok := p.CheckToken(pdflex.ItemEOL, true)
+				if ok && len(i.Val) == 2 {
+					// CRLF - done with this line
+					continue
+				}
+				if i.Typ == pdflex.ItemSpace && len(i.Val) == 1 {
+					// not CRLF, but it was SP ...still OK
+					if j, ok := p.CheckToken(pdflex.ItemEOL, true); ok && len(j.Val) == 1 {
+						// single CR or LF - all is well.
+						continue
+					}
+				}
+
+				// line is invalid, bail.
+				p.ResetToHere()
+				continue mainLoop
+			}
+		}
+		p.ResetToHere()
+	}
+}
+
+func locateObj(in []byte, i int) int {
+	idx := bytes.Index(in, []byte(fmt.Sprintf("\n%d 0 obj", i)))
+	if idx < 0 {
+		idx = bytes.Index(in, []byte(fmt.Sprintf("\r%d 0 obj", i)))
+		if idx < 0 {
+			return idx
+		}
+	}
+	// We found something. Add 1 to the offset so the index is ahead of the \n
+	// or \r
+	return idx + 1
+}
+
+func fix(in []byte) []byte {
+	p := Parser{Lexer: pdflex.NewLexer("", string(in))}
+	return p.FixXrefs(in)
 }
 
 func inflate(s string) (string, error) {
@@ -198,7 +438,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	for _, arg := range os.Args[1:] {
+	for _, arg := range flag.Args() {
 
 		raw, err := ioutil.ReadFile(arg)
 		if err != nil {
@@ -225,7 +465,7 @@ func main() {
 					if err != nil && *flagStrict {
 						log.Fatalf("[STRICT] Error unzipping internal stream: %s", err)
 					}
-					// If not struct, we ignore any errors here. If it's
+					// If not strict, we ignore any errors here. If it's
 					// unexpected EOF we'll get partial unzipped data, so use
 					// that for truncation. Other errors will read a zero
 					// length string, in which case we fall back to truncating
@@ -279,7 +519,7 @@ func main() {
 			}
 		}
 
-		fixed := fixXrefs(out.Bytes())
+		fixed := fix(out.Bytes())
 		newfn := strings.TrimSuffix(path.Base(arg), path.Ext(arg)) + "-small" + path.Ext(arg)
 		newfn = path.Join(path.Dir(arg), newfn)
 		err = ioutil.WriteFile(newfn, fixed, 0600)

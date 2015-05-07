@@ -1,3 +1,5 @@
+// Package pdflex is a lexer for PDF files, based on the spec PDF32000_2008.pdf.
+
 // Initial code inspiration text/template/parse, which is licensed as:
 
 // Copyright 2011 The Go Authors. All rights reserved.
@@ -33,6 +35,7 @@ const (
 	ItemEOF
 	ItemNumber    // PDF Number 7.3.3
 	ItemSpace     // run of space characters 7.2.2 Table 1
+	ItemEOL 	  // special just token for line breaks. \n, \r or \r\n
 	ItemLeftDict  // Just the << token
 	ItemRightDict // >> token
 	ItemLeftArray
@@ -175,7 +178,7 @@ func (l *Lexer) NextItem() Item {
 	return item
 }
 
-// lex creates a new scanner for the input string.
+// NewLexer creates a new scanner for the input string.
 func NewLexer(name, input string) *Lexer {
 	l := &Lexer{
 		name:  name,
@@ -199,6 +202,13 @@ func (l *Lexer) run() {
 // namespace, as well as inside dicts <<>> and arrays [].
 func lexDefault(l *Lexer) stateFn {
 	switch r := l.next(); {
+	case r == '\r':
+		l.accept("\n")
+		l.emit(ItemEOL)
+		return lexDefault
+	case r == '\n':
+		l.emit(ItemEOL)
+		return lexDefault
 	case unicode.IsSpace(r):
 		return lexSpace
 	case r == '/':
@@ -267,24 +277,21 @@ func lexDefault(l *Lexer) stateFn {
 func lexStream(l *Lexer) stateFn {
 
 	// emit a space token for the space(s) terminating the stream marker
-	if !unicode.IsSpace(l.peek()) {
-		return l.errorf("expected space terminator for stream keyword, got: %#U", l.peek())
+	if !l.scanEOL() {
+		return l.errorf("expected EOL terminator for stream keyword, got: %#U", l.peek())
 	}
-	for unicode.IsSpace(l.peek()) {
-		l.next()
-	}
+	l.emit(ItemEOL)
 
-	l.emit(ItemSpace)
 	i := strings.Index(l.input[l.pos:], rightStream)
 	if i < 0 {
 		return l.errorf("unclosed stream")
 	}
 
 	substr := l.input[l.pos : l.pos+Pos(i)]
-
+	// We have now consumed the stream contents AND a whitespace separator. We
+	// actually want to emit the stream body token 'bare', so now we need to
+	// walk backwards past those spaces.
 	for {
-		// un-emit any trailing space chars at the end of the stream data,
-		// immediately before the endstream marker.
 		r, size := utf8.DecodeLastRuneInString(substr)
 		if !unicode.IsSpace(r) || len(substr) <= 0 {
 			break
@@ -295,7 +302,7 @@ func lexStream(l *Lexer) stateFn {
 	l.pos += Pos(len(substr))
 	l.emit(ItemStreamBody)
 
-	// let lexDefault lex the space and the endstream token
+	// let lexDefault take care of lexing the space and the endstream token
 
 	return lexDefault
 }
@@ -411,7 +418,8 @@ func lexHexObj(l *Lexer) stateFn {
 func lexSpace(l *Lexer) stateFn {
 	// This is more permissive than the spec, which doesn't mention U+0085
 	// (NEL), U+00A0 (NBSP)
-	for unicode.IsSpace(l.peek()) {
+	// We don't allow space runs that include any EOL chars.
+	for isSpace(l.peek()) {
 		l.next()
 	}
 	l.emit(ItemSpace)
@@ -470,9 +478,24 @@ func (l *Lexer) scanNumber() bool {
 	return false
 }
 
+func (l *Lexer) scanEOL() bool {
+	if !isEndOfLine(l.peek()) {
+		return false
+	}
+	r := l.next()
+	if r == '\r' {
+		l.accept("\n")
+	}
+	return true
+}
+
 // isEndOfLine reports whether r is an end-of-line character.
 func isEndOfLine(r rune) bool {
 	return r == '\r' || r == '\n'
+}
+
+func isSpace(r rune) bool {
+	return unicode.IsSpace(r) && !isEndOfLine(r)
 }
 
 // isDelim reports whether r is one of the 10 reserved PDF delimiter characters
