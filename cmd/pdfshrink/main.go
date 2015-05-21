@@ -16,7 +16,7 @@ import (
 	"strings"
 )
 
-const MAXDATA = 1024
+const MAXDATA = 128
 
 var xref = []byte("xref")
 var startxref = []byte("startxref")
@@ -41,7 +41,7 @@ const (
 // Section Header rows are Offset, count
 // 'f' is free 'n' is live object
 // Object entries are specified as exactly 20 bytes.
-// [0-9]{10} [0-9]{5} [fn] \r\n
+// [0-9]{10} [0-9]{5} [fn]\r\n
 // 8 1 <- one entry expected, Offset 8
 // 0000037413 00000 n <- object 8
 // 10 1
@@ -75,8 +75,8 @@ type Row struct {
 }
 
 // FindXref parses forward until it finds an xref token, emitting all seen
-// tokens to scratch. It is responsible for maintaining the 'to' parser member
-// which records the start of the most recent xref section and the 'inside'
+// tokens to scratch. It is responsible for maintaining the 'LastXref' parser member
+// which records the start of the most recent xref section and the 'State'
 // struct member which is a sanity check to verify when we think we're in the
 // middle of parsing an xrefs.
 func (p *Parser) FindXref() bool {
@@ -188,9 +188,11 @@ func (p *Parser) SeemsLegit() bool {
 
 // FindHeader is called directly after an xref token, or after the end of a
 // section inside an xref. If tries to find EITHER a header row (Offset count
-// EOL) or the trailer keyword. If it finds a trailer it will advance to the
-// next %%EOF token, reset the state variables ready to find the next xref
-// ( if any ) and then return false.
+// EOL) or the trailer keyword. If it finds a trailer it will:
+// - advance to the next startxref token
+// - fix the startxref offset
+// - reset the state variables ready to find the next xref ( if any )
+// and then return false.
 func (p *Parser) FindHeader() bool {
 	if p.State != inside {
 		p.ResetToHere()
@@ -279,7 +281,7 @@ func (p *Parser) FindHeader() bool {
 
 // FixXrefs is the main parsing loop. Essentially it seeks to an xref token,
 // then loops through parsing the xref header rows and object entry rows. When
-// no more xref tokens are found runs through until the end of the file.
+// no more xref tokens are found it runs through until the end of the file.
 func (p *Parser) FixXrefs(in []byte) []byte {
 mainLoop:
 	for {
@@ -297,9 +299,10 @@ mainLoop:
 			p.ResetToHere()
 			continue mainLoop
 		}
-		// found a new xref section now ( this label just for clarity )
+		// found a new xref section now
 		for p.FindHeader() {
 			// found a header - from, to, idx, Offset are set
+		entryLoop: // ( this label just for clarity )
 			for i := 0; i < p.Entries; i++ {
 
 				row, err := p.FindRow()
@@ -330,13 +333,13 @@ mainLoop:
 				i, ok := p.CheckToken(pdflex.ItemEOL, true)
 				if ok && len(i.Val) == 2 {
 					// CRLF - done with this line
-					continue
+					continue entryLoop
 				}
 				if i.Typ == pdflex.ItemSpace && len(i.Val) == 1 {
 					// not CRLF, but it was SP ...still OK
 					if j, ok := p.CheckToken(pdflex.ItemEOL, true); ok && len(j.Val) == 1 {
 						// single CR or LF - all is well.
-						continue
+						continue entryLoop
 					}
 				}
 
@@ -401,14 +404,14 @@ func un85(s string) (string, error) {
 	// Caller is expected to trim <~ ~> if present
 	in = bytes.TrimPrefix(in, pref85)
 	in = bytes.TrimSuffix(in, suff85)
-	out := make([]byte, 0, len(in))
+	dec := ascii85.NewDecoder(bytes.NewReader(in))
+	out, err := ioutil.ReadAll(dec)
 
-	n, _, err := ascii85.Decode(out, in, true)
 	if err != nil {
 		return "", err
 	}
 
-	return string(out[:n]), nil
+	return string(out), nil
 }
 
 func re85(s string) (string, error) {
@@ -451,6 +454,7 @@ func main() {
 		asc85 := false
 		for i := l.NextItem(); i.Typ != pdflex.ItemEOF; i = l.NextItem() {
 			if i.Typ == pdflex.ItemStreamBody {
+
 				s := i.Val
 
 				if asc85 {
@@ -499,6 +503,7 @@ func main() {
 						log.Fatalf("Error Ascii85ing zipped string: %s", err)
 					}
 				}
+
 				out.WriteString(s)
 				zipped = false
 				asc85 = false
