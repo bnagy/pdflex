@@ -21,8 +21,8 @@ const MAXDATA = 128
 var xref = []byte("xref")
 var startxref = []byte("startxref")
 var trailer = []byte("trailer")
-var pref85 = []byte("<~")
-var suff85 = []byte("~>")
+var pref85 = "<~"
+var suff85 = "~>"
 
 var (
 	flagStrict *bool = flag.Bool("strict", false, "Abort on xref parsing errors etc")
@@ -90,7 +90,11 @@ func (p *Parser) FindXref() bool {
 		p.Scratch.WriteString(i.Val)
 		if i.Typ == pdflex.ItemXref {
 			p.State = inside
-			p.LastXref = int(i.Pos)
+			// FIXED - make sure to use the index of the xref in Scratch, not
+			// in the input buffer, because when you change the
+			// "startxref\rNNNNNNN" string size they get out of sync in files
+			// with multiple xref sections
+			p.LastXref = p.Scratch.Len() - len(i.Val)
 			return true
 		}
 	}
@@ -173,7 +177,7 @@ func (p *Parser) CheckToken(t pdflex.ItemType, accept bool) (pdflex.Item, bool) 
 // parsing aborted.
 func (p *Parser) ResetToHere() {
 	p.State = outside
-	p.From = int(p.Pos())
+	p.From = p.Scratch.Len()
 	p.LastXref, p.Idx, p.Offset, p.Entries = -1, -1, -1, -1
 }
 
@@ -231,6 +235,7 @@ func (p *Parser) FindHeader() bool {
 				// Next tokens should be ItemEOL then ItemComment %%EOF, but
 				// we don't actually care, let the general parsing loop emit
 				// them.
+
 				p.ResetToHere()
 				return false
 			}
@@ -301,8 +306,8 @@ mainLoop:
 		}
 		// found a new xref section now
 		for p.FindHeader() {
+		entryLoop:
 			// found a header - from, to, idx, Offset are set
-		entryLoop: // ( this label just for clarity )
 			for i := 0; i < p.Entries; i++ {
 
 				row, err := p.FindRow()
@@ -312,7 +317,7 @@ mainLoop:
 				}
 
 				if row.Active {
-					objOffset := locateObj(in[p.From:p.LastXref], p.Idx+i)
+					objOffset := locateObj(p.Scratch.Bytes()[p.From:p.LastXref], p.Idx+i)
 					// no matching object, emit the row unmodified
 					if objOffset < 0 {
 						objOffset = row.Offset
@@ -320,6 +325,7 @@ mainLoop:
 						// If we found it in a subslice, add the from index to
 						// get the true index from the start of the input.
 						objOffset += p.From
+
 					}
 					p.Scratch.WriteString(fmt.Sprintf("%.10d %.5d n", objOffset, row.Generation))
 				} else {
@@ -348,7 +354,7 @@ mainLoop:
 				continue mainLoop
 			}
 		}
-		p.ResetToHere()
+		p.ResetToHere() // probably not neccessary, but idempotent
 	}
 }
 
@@ -400,11 +406,10 @@ func deflate(s string) (string, error) {
 
 func un85(s string) (string, error) {
 
-	in := []byte(s)
 	// Caller is expected to trim <~ ~> if present
-	in = bytes.TrimPrefix(in, pref85)
-	in = bytes.TrimSuffix(in, suff85)
-	dec := ascii85.NewDecoder(bytes.NewReader(in))
+	s = strings.TrimPrefix(s, pref85)
+	s = strings.TrimSuffix(s, suff85)
+	dec := ascii85.NewDecoder(strings.NewReader(s))
 	out, err := ioutil.ReadAll(dec)
 
 	if err != nil {
@@ -467,7 +472,7 @@ func main() {
 				if zipped {
 					s2, err := inflate(s)
 					if err != nil && *flagStrict {
-						log.Fatalf("[STRICT] Error unzipping internal stream: %s", err)
+						log.Fatalf("[STRICT] Error unzipping internal stream: %s\n", err)
 					}
 					// If not strict, we ignore any errors here. If it's
 					// unexpected EOF we'll get partial unzipped data, so use
