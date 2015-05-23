@@ -35,6 +35,12 @@ var tfTruncate = testFile{
 	md5:  "826ac13a21386acc7e79ca3c0e44b8c5",
 }
 
+// This has one xref row hex-edited to end with <SP><LF> to increase coverage
+var tf85 = testFile{
+	name: "test-85.pdf",
+	md5:  "fa7e8078b43b17c6b79deabb8f143ca2",
+}
+
 func openVerify(tf testFile) ([]byte, error) {
 
 	fr, err := os.Open(tf.name)
@@ -170,5 +176,31 @@ func TestTruncate(t *testing.T) {
 	got := string(contents[len(contents)-len(want):])
 	if want != got {
 		t.Fatalf("failed to fix xref row, want %q got %q", want, got)
+	}
+}
+
+func TestShrink(t *testing.T) {
+	contents, err := openVerify(tf85)
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+	shrink128, err := shrink(contents, 128) // should be a noop
+	for i, b := range shrink128 {
+		if b != contents[i] {
+			t.Fatalf("%s was modified during shrink()", tf85.name)
+		}
+	}
+
+	shrink127, err := shrink(contents, 127) // should shrink
+	if err != nil {
+		t.Fatalf("error while shrinking: %s", err)
+	}
+
+	shrink127 = fix(shrink127)
+	idx := bytes.LastIndex(shrink127, []byte("startxref"))
+	want := "startxref\r55370"
+	got := string(shrink127[idx : idx+len(want)])
+	if got != want {
+		t.Fatalf("unexpected value at startxref, want %q, got %q", want, got)
 	}
 }

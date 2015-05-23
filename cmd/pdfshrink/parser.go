@@ -200,7 +200,6 @@ func (p *Parser) MaybeFindHeader() bool {
 	}
 
 	i := p.NextItem()
-
 	p.Scratch.WriteString(i.Val)
 	var err error
 
@@ -241,7 +240,6 @@ func (p *Parser) MaybeFindHeader() bool {
 		}
 
 	case pdflex.ItemNumber:
-
 		p.Offset, err = strconv.Atoi(i.Val)
 		if err != nil {
 			p.ResetToHere()
@@ -264,15 +262,26 @@ func (p *Parser) MaybeFindHeader() bool {
 			return false
 		}
 
-		if _, ok := p.CheckToken(pdflex.ItemEOL, true); !ok {
+		// Accept both 1 and 2 byte <EOL> as well as <SP><EOL>. Don't know if
+		// this is strictly per-spec, but it's common.
+		i, ok = p.CheckToken(pdflex.ItemEOL, true)
+		if !ok && i.Typ != pdflex.ItemSpace {
 			p.ResetToHere()
 			return false
+		}
+		if i.Typ == pdflex.ItemSpace {
+			// not CRLF, but it was SP ...we must get <EOL> now
+			if _, ok := p.CheckToken(pdflex.ItemEOL, true); !ok {
+				p.ResetToHere()
+				return false
+			}
 		}
 
 		p.Idx = p.Offset
 		if !p.SeemsLegit() {
 			panic("BUG: logic broken in MaybeFindHeader")
 		}
+
 		return true
 
 	case pdflex.ItemEOF:
@@ -297,7 +306,6 @@ func (p *Parser) MaybeFindHeader() bool {
 func (p *Parser) FixXrefs() []byte {
 mainLoop:
 	for {
-
 		found := p.MaybeFindXref()
 		if !found {
 			if p.State != eof {
