@@ -92,7 +92,7 @@ func (p *Parser) FindRow() (r Row, e error) {
 
 	bailout += i.Val
 	if !ok || len(i.Val) != 10 {
-		e = fmt.Errorf("Corrupt row - want 10 digit offset, got %#v", i)
+		e = fmt.Errorf("corrupt row - want 10 digit offset, got %#v", i)
 		p.Scratch.WriteString(bailout)
 		return
 	}
@@ -100,14 +100,14 @@ func (p *Parser) FindRow() (r Row, e error) {
 	if e != nil {
 		// Still need to handle errors - something like +12.5 will pass the
 		// lexer, but not Atoi
-		e = fmt.Errorf("Corrupt row - want 10 digit offset, got %#v", i)
+		e = fmt.Errorf("corrupt row - want 10 digit offset, got %#v", i)
 		return
 	}
 
 	i, ok = p.CheckToken(pdflex.ItemSpace, false)
 	bailout += i.Val
 	if !ok || len(i.Val) != 1 {
-		e = fmt.Errorf("Corrupt row - want ItemSpace, got %#v", i)
+		e = fmt.Errorf("corrupt row - want ItemSpace, got %#v", i)
 		p.Scratch.WriteString(bailout)
 		return
 	}
@@ -115,20 +115,20 @@ func (p *Parser) FindRow() (r Row, e error) {
 	i, ok = p.CheckToken(pdflex.ItemNumber, false)
 	bailout += i.Val
 	if !ok || len(i.Val) != 5 {
-		e = fmt.Errorf("Corrupt row - want 5 digit generation, got %#v", i)
+		e = fmt.Errorf("corrupt row - want 5 digit generation, got %#v", i)
 		p.Scratch.WriteString(bailout)
 		return
 	}
 	r.Generation, e = strconv.Atoi(i.Val)
 	if e != nil {
-		e = fmt.Errorf("Corrupt row - 5 digit generation, got %#v", i)
+		e = fmt.Errorf("corrupt row - 5 digit generation, got %#v", i)
 		return
 	}
 
 	i, ok = p.CheckToken(pdflex.ItemSpace, false)
 	bailout += i.Val
 	if !ok || len(i.Val) != 1 {
-		e = fmt.Errorf("Corrupt row - want ItemSpace, got %#v", i)
+		e = fmt.Errorf("corrupt row - want ItemSpace, got %#v", i)
 		p.Scratch.WriteString(bailout)
 		return
 	}
@@ -136,7 +136,7 @@ func (p *Parser) FindRow() (r Row, e error) {
 	i, ok = p.CheckToken(pdflex.ItemWord, false)
 	bailout += i.Val
 	if !ok || len(i.Val) != 1 || !(i.Val == "n" || i.Val == "f") {
-		e = fmt.Errorf("Corrupt row - want [nf], got %#v", i)
+		e = fmt.Errorf("corrupt row - want [nf], got %#v", i)
 		p.Scratch.WriteString(bailout)
 		return
 	}
@@ -311,11 +311,13 @@ mainLoop:
 			p.ResetToHere()
 			continue mainLoop
 		}
+
 		// found a new xref section now
 		for p.MaybeFindHeader() {
-
+			if !p.SeemsLegit() {
+				panic("BUG: SeemsLegit() failed after we found a header!")
+			}
 		entryLoop:
-			// found a header - from, to, idx, Offset are set
 			for i := 0; i < p.Entries; i++ {
 
 				row, err := p.FindRow()
@@ -352,7 +354,8 @@ mainLoop:
 				if i.Typ == pdflex.ItemSpace && len(i.Val) == 1 {
 					// not CRLF, but it was SP ...still OK if we get a linebreak now
 					if j, ok := p.CheckToken(pdflex.ItemEOL, true); ok && len(j.Val) == 1 {
-						// single CR or LF - all is well.
+						// single CR or LF - all is well. Strictly speaking we
+						// should only accept \r, not \n. Meh.
 						continue entryLoop
 					}
 				}
@@ -374,7 +377,6 @@ func locateObj(in []byte, i int) int {
 			return idx
 		}
 	}
-	// We found something. Add 1 to the offset so the index is ahead of the \n
-	// or \r
+	// Add 1 to the offset so the index is ahead of the \n or \r
 	return idx + 1
 }

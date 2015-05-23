@@ -39,19 +39,19 @@ func openVerify(tf testFile) ([]byte, error) {
 
 	fr, err := os.Open(tf.name)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to open %s", tf.name)
+		return nil, fmt.Errorf("failed to open %s", tf.name)
 	}
 
 	md5 := md5.New()
 	tr := io.TeeReader(fr, md5)
 	contents, err := ioutil.ReadAll(tr)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to read from %s: %s", tf.name, err)
+		return nil, fmt.Errorf("failed to read from %s: %s", tf.name, err)
 	}
 
 	hsh := hex.EncodeToString(md5.Sum(nil))
 	if hsh != tf.md5 {
-		return nil, fmt.Errorf("Validation for %s failed: want MD5 %s, got %s", tf.name, tf.md5, hsh)
+		return nil, fmt.Errorf("validation for %s failed: want MD5 %s, got %s", tf.name, tf.md5, hsh)
 	}
 
 	return contents, nil
@@ -62,7 +62,6 @@ func TestRewrite(t *testing.T) {
 	if err != nil {
 		t.Fatalf(err.Error())
 	}
-	t.Logf("Unmodified: %d bytes", len(contents))
 	fixed := fix(contents)
 	for i, b := range fixed {
 		if b != contents[i] {
@@ -82,11 +81,11 @@ func TestCorruptFirstXref(t *testing.T) {
 
 	// Find the first xref, make sure the parser is right about LastXref
 	if !p.MaybeFindXref() {
-		t.Fatalf("Failed to find first xref")
+		t.Fatalf("failed to find first xref")
 	}
 	xridx := bytes.Index(contents, []byte("xref"))
 	if p.LastXref != xridx || p.LastXref != 16196 {
-		t.Fatalf("Incorrect index for first xref. Want %d, got %d", p.LastXref, xridx)
+		t.Fatalf("incorrect index for first xref. Want %d, got %d", p.LastXref, xridx)
 	}
 
 	if _, ok := p.CheckToken(pdflex.ItemEOL, true); !ok {
@@ -101,7 +100,7 @@ func TestCorruptFirstXref(t *testing.T) {
 	// Hardcoded
 	if p.Entries != 97 || p.Offset != 0 {
 		t.Fatalf(
-			"Incorrect values for header. Want Offset 0, "+
+			"incorrect values for header. Want Offset 0, "+
 				"Entries 97, got Offset %d, Entries %d",
 			p.Offset,
 			p.Entries,
@@ -110,24 +109,24 @@ func TestCorruptFirstXref(t *testing.T) {
 
 	r, e := p.FindRow()
 	if e != nil || r.Generation != 65535 {
-		t.Fatalf("Unexpected first row %#v", r)
+		t.Fatalf("unexpected first row %#v", r)
 	}
 	p.Scratch.WriteString(fmt.Sprintf("%.10d %.5d f", r.Offset, r.Generation))
 
 	if r, e := p.FindRow(); e == nil {
-		t.Fatalf("Failed to error on corrupt row %#v", r)
+		t.Fatalf("failed to error on corrupt row %#v", r)
 	}
 	p.ResetToHere()
 
 	// Find the second xref, make sure the parser is right about LastXref
 	if !p.MaybeFindXref() {
-		t.Fatalf("Failed to find second xref")
+		t.Fatalf("failed to find second xref")
 	}
 	if _, ok := p.CheckToken(pdflex.ItemEOL, true); !ok {
-		t.Fatalf("Failed to find EOL")
+		t.Fatalf("failed to find EOL")
 	}
 	if p.LastXref != 21619 {
-		t.Fatalf("Incorrect index for second xref. Want 21619, got %d", p.LastXref)
+		t.Fatalf("incorrect index for second xref. Want 21619, got %d", p.LastXref)
 	}
 	if !p.MaybeFindHeader() {
 		t.Fatalf("failed to find second header")
@@ -135,7 +134,7 @@ func TestCorruptFirstXref(t *testing.T) {
 	// Hardcoded
 	if p.Entries != 1 || p.Offset != 4 {
 		t.Fatalf(
-			"Incorrect values for header. Want Offset 4, "+
+			"incorrect values for header. Want Offset 4, "+
 				"Entries 1, got Offset %d, Entries %d",
 			p.Offset,
 			p.Entries,
@@ -149,14 +148,14 @@ func TestCorruptFirstXref(t *testing.T) {
 	wantFirst := "startxref\r12345"
 	gotFirst := string(contents[first : first+len(wantFirst)])
 	if gotFirst != wantFirst {
-		t.Fatalf("Unexpected value at first startxref, want %q, got %q", wantFirst, gotFirst)
+		t.Fatalf("unexpected value at first startxref, want %q, got %q", wantFirst, gotFirst)
 	}
 
 	second := bytes.LastIndex(contents, []byte("startxref"))
 	wantSecond := "startxref\r21619"
 	gotSecond := string(contents[second : second+len(wantSecond)])
 	if gotSecond != wantSecond {
-		t.Fatalf("Unexpected value at second startxref, want %q, got %q", wantSecond, gotSecond)
+		t.Fatalf("unexpected value at second startxref, want %q, got %q", wantSecond, gotSecond)
 	}
 }
 
@@ -170,7 +169,6 @@ func TestTruncate(t *testing.T) {
 	want := "0000021142 00000 n\r\n"
 	got := string(contents[len(contents)-len(want):])
 	if want != got {
-		t.Fatalf("Failed to fix xref row, want %q got %q", want, got)
+		t.Fatalf("failed to fix xref row, want %q got %q", want, got)
 	}
-
 }

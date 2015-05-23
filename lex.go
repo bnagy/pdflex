@@ -35,7 +35,7 @@ const (
 	ItemEOF
 	ItemNumber    // PDF Number 7.3.3
 	ItemSpace     // run of space characters 7.2.2 Table 1
-	ItemEOL 	  // special just token for line breaks. \n, \r or \r\n
+	ItemEOL       // special just token for line breaks. \n, \r or \r\n
 	ItemLeftDict  // Just the << token
 	ItemRightDict // >> token
 	ItemLeftArray
@@ -269,7 +269,6 @@ func lexDefault(l *Lexer) stateFn {
 	default:
 		return l.errorf("illegal character: %#U", r)
 	}
-	return lexDefault
 }
 
 // lexStream quickly skips over all the contents of PDF stream objects. The

@@ -15,8 +15,6 @@ import (
 	"strings"
 )
 
-const MAXDATA = 128
-
 var xref = []byte("xref")
 var startxref = []byte("startxref")
 var trailer = []byte("trailer")
@@ -24,8 +22,8 @@ var pref85 = "<~"
 var suff85 = "~>"
 
 var (
-	flagStrict *bool = flag.Bool("strict", false, "Abort on xref parsing errors etc")
-	flagMax    *int  = flag.Int("max", MAXDATA, "Trim streams whose size is greater than this value")
+	flagStrict = flag.Bool("strict", false, "Abort on xref parsing errors etc")
+	flagMax    = flag.Int("max", 128, "Trim streams whose size is greater than this value")
 )
 
 func inflate(s string) (string, error) {
@@ -128,14 +126,14 @@ func shrink(in []byte, max int) ([]byte, error) {
 				s, err = deflate(s)
 				if err != nil {
 					// should never happen, strict mode or not
-					return nil, fmt.Errorf("Error zipping truncated string: %s", err)
+					return nil, fmt.Errorf("error zipping truncated string: %s", err)
 				}
 			}
 			if asc85 {
 				s, err = re85(s)
 				if err != nil {
 					// ditto
-					return nil, fmt.Errorf("Error Ascii85ing string: %s", err)
+					return nil, fmt.Errorf("error Ascii85ing string: %s", err)
 				}
 			}
 
