@@ -41,6 +41,233 @@ var tf85 = testFile{
 	md5:  "fa7e8078b43b17c6b79deabb8f143ca2",
 }
 
+var xrClean = `xref
+0 1
+0000018286 00000 n
+trailer
+<</Size 111/Root 83 0 R/Info 94 0 R/ID[<CBADA98C42F6D90E286F6A1B3C52084F><F993129E77AB41D9A2951A6AB40174DA>]/Prev 425853 >>
+startxref
+0
+%%EOF`
+
+type xrefError struct {
+	desc  string
+	input string
+}
+
+var fixErrors = []xrefError{
+	xrefError{
+		input: `xref 0 1
+0000018286 00000 n
+22 60
+trailer
+`,
+		desc: "no EOL after xref",
+	},
+
+	xrefError{
+		input: `xref
+A B
+0000018286 00000 n
+2.2 60
+trailer
+`,
+		desc: "invalid first header",
+	},
+
+	xrefError{
+		input: `xref
+0 1
+0000018286 QQQQQ n
+22 60
+trailer
+`,
+		desc: "invalid first row",
+	},
+
+	xrefError{
+		input: `xref
+0 1
+0000018286 00000 n		
+22 60
+trailer
+`,
+		desc: "invalid line termination at first row",
+	},
+}
+
+var headerErrors = []xrefError{
+
+	xrefError{
+		input: `xref
+0 1
+0000018286 00000 n
+2.2 60
+trailer
+`,
+		desc: "lexable offset fails Atoi",
+	},
+
+	xrefError{
+		input: `xref
+0 1
+0000018286 00000 n
+22 6.0
+trailer
+`,
+		desc: "lexable entries fails Atoi",
+	},
+
+	xrefError{
+		input: `xref
+0 1
+0000018286 00000 n
+22 xyzzy
+trailer
+`,
+		desc: "entries is not a number",
+	},
+
+	xrefError{
+		input: `xref
+0 1
+0000018286 00000 n
+22 1	Q
+trailer
+`,
+		desc: "<SP> + invalid token after header",
+	},
+
+	xrefError{
+		input: `xref
+0 1
+0000018286 00000 n
+22 1>>
+trailer
+`,
+		desc: "invalid token after header",
+	},
+
+	xrefError{
+		input: `xref
+0 1
+0000018286 00000 n
+xyzzy 1
+trailer
+`,
+		desc: "offset is not a number",
+	},
+
+	xrefError{
+		input: `xref
+0 1
+0000018286 00000 n
+22
+60
+trailer
+`,
+		desc: "linebreak after offset",
+	},
+
+	xrefError{
+		input: `xref
+0 1
+0000018286 00000 n
+trailer`,
+		desc: "EOF after trailer",
+	},
+
+	xrefError{
+		input: `xref
+0 1
+0000018286 00000 n`,
+		desc: "EOF after row",
+	},
+
+	xrefError{
+		input: `xref
+0 1
+0000018286 00000 n
+`,
+		desc: "EOF after row + <EOL>",
+	},
+
+	xrefError{
+		input: `xref
+0 1
+0000018286 00000 n
+trailer
+<</Size 111/Root 83 0 R/Info 94 0 R/ID[<CBADA98C42F6D90E286F6A1B3C52084F><F993129E77AB41D9A2951A6AB40174DA>]/Prev 425853 >>
+startxref 0
+%%EOF`,
+		desc: "no EOL after startxref",
+	},
+
+	xrefError{
+		input: `xref
+0 1
+0000018286 00000 n
+trailer
+<</Size 111/Root 83 0 R/Info 94 0 R/ID[<CBADA98C42F6D90E286F6A1B3C52084F><F993129E77AB41D9A2951A6AB40174DA>]/Prev 425853 >>
+startxref
+xyzzy
+%%EOF`,
+		desc: "startxref entry not a number",
+	},
+}
+
+var rowErrors = []xrefError{
+	xrefError{
+		input: `xref
+0 1
+000018286 00000 n
+`,
+		desc: "short offset",
+	},
+	xrefError{
+		input: `xref
+0 1
+0000018286
+00000 n
+trailer
+`,
+		desc: "linebreak after offset",
+	},
+	xrefError{
+		input: `xref
+0 1
+0000018286 00000
+ n
+trailer
+`,
+		desc: "linebreak after generation",
+	},
+	xrefError{
+		input: `xref
+0 1
+0000018286 00.00 n
+trailer
+`,
+		desc: "lexable generation fails Atoi",
+	},
+	xrefError{
+		input: `xref
+0 1
++000018.86 00000 n
+trailer
+`,
+		desc: "lexable offset fails Atoi",
+	},
+	xrefError{
+		input: `xref
+0 1
+0000018286 ABCD n
+trailer
+`,
+		desc: "generation not a number",
+	},
+}
+
 func openVerify(tf testFile) ([]byte, error) {
 
 	fr, err := os.Open(tf.name)
@@ -202,5 +429,71 @@ func TestShrink(t *testing.T) {
 	got := string(shrink127[idx : idx+len(want)])
 	if got != want {
 		t.Fatalf("unexpected value at startxref, want %q, got %q", want, got)
+	}
+}
+
+func TestXrefClean(t *testing.T) {
+	p := Parser{Lexer: pdflex.NewLexer("", xrClean)}
+	if !p.MaybeFindXref() || p.LastXref != 0 {
+		t.Fatalf("failed to find xref")
+	}
+	p.CheckToken(pdflex.ItemEOL, true)
+	if !p.MaybeFindHeader() {
+		t.Fatalf("failed to find header")
+	}
+	_, err := p.FindRow()
+	if err != nil {
+		t.Fatalf("failed to find row")
+	}
+	if p.MaybeFindHeader() {
+		t.Fatalf("shouldn't have found a header")
+	}
+}
+
+func TestFixXrefs(t *testing.T) {
+	for _, fixErr := range fixErrors {
+		p := Parser{Lexer: pdflex.NewLexer("", fixErr.input)}
+		out := p.FixXrefs()
+		if string(out) != fixErr.input {
+			t.Fatalf("broken xref was modified by fix")
+		}
+	}
+}
+
+func TestFindRow(t *testing.T) {
+	for _, rowErr := range rowErrors {
+		p := Parser{Lexer: pdflex.NewLexer("", rowErr.input)}
+		if !p.MaybeFindXref() || p.LastXref != 0 {
+			t.Fatalf("failed to find xref")
+		}
+		p.CheckToken(pdflex.ItemEOL, true)
+		if !p.MaybeFindHeader() {
+			t.Fatalf("failed to find header")
+		}
+		_, err := p.FindRow()
+		if err == nil {
+			t.Fatalf("failed to detect error with %s", rowErr.desc)
+		}
+	}
+}
+
+func TestMaybeFindHeader(t *testing.T) {
+	for _, headerErr := range headerErrors {
+		p := Parser{Lexer: pdflex.NewLexer("", headerErr.input)}
+		if !p.MaybeFindXref() || p.LastXref != 0 {
+			t.Fatalf("failed to find xref")
+		}
+		p.CheckToken(pdflex.ItemEOL, true)
+		if !p.MaybeFindHeader() {
+			t.Fatalf("failed to find first header")
+		}
+		_, err := p.FindRow()
+		if err != nil {
+			t.Fatalf("failed to find row")
+		}
+		p.CheckToken(pdflex.ItemEOL, true)
+		if p.MaybeFindHeader() {
+			t.Fatalf("failed to detect invalid header with %s", headerErr.desc)
+		}
 	}
 }
