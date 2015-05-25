@@ -88,7 +88,7 @@ func (p *Parser) FindRow() (r Row, e error) {
 	// we have to abort
 	bailout := ""
 
-	i, ok := p.CheckToken(pdflex.ItemNumber, false)
+	i, ok := p.Accept(pdflex.ItemNumber, false)
 
 	bailout += i.Val
 	if !ok || len(i.Val) != 10 {
@@ -104,7 +104,7 @@ func (p *Parser) FindRow() (r Row, e error) {
 		return
 	}
 
-	i, ok = p.CheckToken(pdflex.ItemSpace, false)
+	i, ok = p.Accept(pdflex.ItemSpace, false)
 	bailout += i.Val
 	if !ok || len(i.Val) != 1 {
 		e = fmt.Errorf("corrupt row - want ItemSpace, got %#v", i)
@@ -112,7 +112,7 @@ func (p *Parser) FindRow() (r Row, e error) {
 		return
 	}
 
-	i, ok = p.CheckToken(pdflex.ItemNumber, false)
+	i, ok = p.Accept(pdflex.ItemNumber, false)
 	bailout += i.Val
 	if !ok || len(i.Val) != 5 {
 		e = fmt.Errorf("corrupt row - want 5 digit generation, got %#v", i)
@@ -125,7 +125,7 @@ func (p *Parser) FindRow() (r Row, e error) {
 		return
 	}
 
-	i, ok = p.CheckToken(pdflex.ItemSpace, false)
+	i, ok = p.Accept(pdflex.ItemSpace, false)
 	bailout += i.Val
 	if !ok || len(i.Val) != 1 {
 		e = fmt.Errorf("corrupt row - want ItemSpace, got %#v", i)
@@ -133,7 +133,7 @@ func (p *Parser) FindRow() (r Row, e error) {
 		return
 	}
 
-	i, ok = p.CheckToken(pdflex.ItemWord, false)
+	i, ok = p.Accept(pdflex.ItemWord, false)
 	bailout += i.Val
 	if !ok || len(i.Val) != 1 || !(i.Val == "n" || i.Val == "f") {
 		e = fmt.Errorf("corrupt row - want [nf], got %#v", i)
@@ -146,12 +146,12 @@ func (p *Parser) FindRow() (r Row, e error) {
 	return
 }
 
-// CheckToken is used to check the type of the next token, returning the token
-// itself and a match boolean. If accept is true the token will be emitted to
+// Accept is used to check the type of the next token, returning the token
+// itself and a match boolean. If write is true the token will be emitted to
 // scratch, whether or not the check matches.
-func (p *Parser) CheckToken(t pdflex.ItemType, accept bool) (pdflex.Item, bool) {
+func (p *Parser) Accept(t pdflex.ItemType, write bool) (pdflex.Item, bool) {
 	i := p.NextItem()
-	if accept {
+	if write {
 		p.Scratch.WriteString(i.Val)
 	}
 	if i.Typ == pdflex.ItemEOF {
@@ -209,21 +209,21 @@ func (p *Parser) MaybeFindHeader() bool {
 		// entry, and then reset to the outside state. Even if there is a
 		// missing %%EOF token we're not going to abort or anything...
 		for {
-			i, bad := p.CheckToken(pdflex.ItemEOF, true)
-			if bad {
+			i, atEOF := p.Accept(pdflex.ItemEOF, true)
+			if atEOF {
 				p.State = eof
 				return false
 			}
 
 			if i.Typ == pdflex.ItemStartXref {
-				if _, ok := p.CheckToken(pdflex.ItemEOL, true); !ok {
+				if _, ok := p.Accept(pdflex.ItemEOL, true); !ok {
 					p.ResetToHere()
 					return false
 				}
 
-				// don't accept in this call to CheckToken, we will write our
+				// don't write in this call to Accept, we will write our
 				// own number
-				if i, ok := p.CheckToken(pdflex.ItemNumber, false); !ok {
+				if i, ok := p.Accept(pdflex.ItemNumber, false); !ok {
 					p.Scratch.WriteString(i.Val)
 					p.ResetToHere()
 					return false
@@ -246,12 +246,12 @@ func (p *Parser) MaybeFindHeader() bool {
 			return false
 		}
 
-		if _, ok := p.CheckToken(pdflex.ItemSpace, true); !ok {
+		if _, ok := p.Accept(pdflex.ItemSpace, true); !ok {
 			p.ResetToHere()
 			return false
 		}
 
-		i, ok := p.CheckToken(pdflex.ItemNumber, true)
+		i, ok := p.Accept(pdflex.ItemNumber, true)
 		if !ok {
 			p.ResetToHere()
 			return false
@@ -264,14 +264,14 @@ func (p *Parser) MaybeFindHeader() bool {
 
 		// Accept both 1 and 2 byte <EOL> as well as <SP><EOL>. Don't know if
 		// this is strictly per-spec, but it's common.
-		i, ok = p.CheckToken(pdflex.ItemEOL, true)
+		i, ok = p.Accept(pdflex.ItemEOL, true)
 		if !ok && i.Typ != pdflex.ItemSpace {
 			p.ResetToHere()
 			return false
 		}
 		if i.Typ == pdflex.ItemSpace {
 			// not CRLF, but it was SP ...we must get <EOL> now
-			if _, ok := p.CheckToken(pdflex.ItemEOL, true); !ok {
+			if _, ok := p.Accept(pdflex.ItemEOL, true); !ok {
 				p.ResetToHere()
 				return false
 			}
@@ -292,7 +292,7 @@ func (p *Parser) MaybeFindHeader() bool {
 		// we'll report no header row found, but still set the "from" index.
 		// That means that if there's another xref later the search scope will
 		// be (hopefully correctly) from the end of this truncated / corrupt
-		// xrefs to the start of the next one.
+		// xref section to the start of the next one.
 		p.ResetToHere()
 		return false
 	}
@@ -315,7 +315,7 @@ mainLoop:
 			return p.Scratch.Bytes()
 		}
 
-		if _, ok := p.CheckToken(pdflex.ItemEOL, true); !ok {
+		if _, ok := p.Accept(pdflex.ItemEOL, true); !ok {
 			p.ResetToHere()
 			continue mainLoop
 		}
@@ -354,14 +354,14 @@ mainLoop:
 				// Correct line terminators are: SP CR, SP LF, or CRLF
 				// This makes a correct line exactly 20 bytes.
 				// Spec section 7.5.4 p 41
-				i, ok := p.CheckToken(pdflex.ItemEOL, true)
+				i, ok := p.Accept(pdflex.ItemEOL, true)
 				if ok && len(i.Val) == 2 {
 					// CRLF - done with this line
 					continue entryLoop
 				}
 				if i.Typ == pdflex.ItemSpace && len(i.Val) == 1 {
 					// not CRLF, but it was SP ...still OK if we get a linebreak now
-					if j, ok := p.CheckToken(pdflex.ItemEOL, true); ok && len(j.Val) == 1 {
+					if j, ok := p.Accept(pdflex.ItemEOL, true); ok && len(j.Val) == 1 {
 						// single CR or LF - all is well. Strictly speaking we
 						// should only accept \r, not \n. Meh.
 						continue entryLoop

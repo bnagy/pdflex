@@ -321,7 +321,7 @@ func TestCorruptFirstXref(t *testing.T) {
 		t.Fatalf("incorrect index for first xref. Want %d, got %d", p.LastXref, xridx)
 	}
 
-	if _, ok := p.CheckToken(pdflex.ItemEOL, true); !ok {
+	if _, ok := p.Accept(pdflex.ItemEOL, true); !ok {
 		t.Fatalf("Missing EOL after xref token")
 	}
 
@@ -355,7 +355,7 @@ func TestCorruptFirstXref(t *testing.T) {
 	if !p.MaybeFindXref() {
 		t.Fatalf("failed to find second xref")
 	}
-	if _, ok := p.CheckToken(pdflex.ItemEOL, true); !ok {
+	if _, ok := p.Accept(pdflex.ItemEOL, true); !ok {
 		t.Fatalf("failed to find EOL")
 	}
 	if p.LastXref != 21619 {
@@ -437,7 +437,7 @@ func TestXrefClean(t *testing.T) {
 	if !p.MaybeFindXref() || p.LastXref != 0 {
 		t.Fatalf("failed to find xref")
 	}
-	p.CheckToken(pdflex.ItemEOL, true)
+	p.Accept(pdflex.ItemEOL, true)
 	if !p.MaybeFindHeader() {
 		t.Fatalf("failed to find header")
 	}
@@ -466,7 +466,7 @@ func TestFindRow(t *testing.T) {
 		if !p.MaybeFindXref() || p.LastXref != 0 {
 			t.Fatalf("failed to find xref")
 		}
-		p.CheckToken(pdflex.ItemEOL, true)
+		p.Accept(pdflex.ItemEOL, true)
 		if !p.MaybeFindHeader() {
 			t.Fatalf("failed to find header")
 		}
@@ -483,7 +483,7 @@ func TestMaybeFindHeader(t *testing.T) {
 		if !p.MaybeFindXref() || p.LastXref != 0 {
 			t.Fatalf("failed to find xref")
 		}
-		p.CheckToken(pdflex.ItemEOL, true)
+		p.Accept(pdflex.ItemEOL, true)
 		if !p.MaybeFindHeader() {
 			t.Fatalf("failed to find first header")
 		}
@@ -491,7 +491,7 @@ func TestMaybeFindHeader(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to find row")
 		}
-		p.CheckToken(pdflex.ItemEOL, true)
+		p.Accept(pdflex.ItemEOL, true)
 		if p.MaybeFindHeader() {
 			t.Fatalf("failed to detect invalid header with %s", headerErr.desc)
 		}
