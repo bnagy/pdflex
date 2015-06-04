@@ -3,7 +3,8 @@ pdflex
 
 ## Documentation
 
-Unless you are a hacker or a weirdo this is not what you are looking for.
+The most overengineered hack tool evar. Unless you are a hacker or a weirdo
+this is not what you are looking for.
 
 ```bash
 $ ./pdftok *.pdf
