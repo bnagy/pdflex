@@ -1,6 +1,8 @@
 pdflex
 =======
 
+[![Build Status](https://travis-ci.org/bnagy/pdflex.svg?branch=master)](https://travis-ci.org/bnagy/pdflex)
+
 ## Documentation
 
 The most overengineered hack tool evar. Unless you are a hacker or a weirdo
