@@ -90,6 +90,9 @@ $ go get -u github.com/bnagy/pdflex/cmd/pdftok
 
 I lexed a bunch of the Adobe Engineering test files (eg from [here](http://acroeng.adobe.com/wp/?page_id=10)) and put the Literal Name tokens in [toks_raw.txt](toks_raw.txt). These have been further curated (by hand) in [toks_curated.txt](toks_curated.txt) - I am using these to augment my AFL PDF dictionary. You will need to write your own script to emit each line as a file, which AFL requires.
 
+* `pdftok` needs tests!
+* refactor `parser.go` from `pdfshrink` to be more general purpose, use for other stuff
+
 ## Contributing
 
 Fork and send a pull request.

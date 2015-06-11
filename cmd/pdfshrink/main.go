@@ -92,7 +92,7 @@ func shrink(in []byte, max int) ([]byte, error) {
 
 			if asc85 {
 				s, err = un85(s)
-				if err != nil {
+				if err != nil && *flagStrict {
 					log.Fatalf("[STRICT] Failed to un85: %s", err)
 				}
 			}
@@ -169,7 +169,9 @@ func main() {
 	flag.Usage = func() {
 		fmt.Fprintf(
 			os.Stderr,
-			"  Usage: %s file [file file ...]\n",
+			"  Usage: %s file [file file ...]\n"+
+				"    -max=128: Trim streams whose size is greater than this value\n"+
+				"    -strict=false: Abort on xref parsing errors etc\n",
 			path.Base(os.Args[0]),
 		)
 	}
@@ -181,6 +183,8 @@ func main() {
 	}
 
 	for _, arg := range flag.Args() {
+
+		fmt.Fprintf(os.Stderr, "[SHRINKING] %s\n", arg)
 
 		// Read in
 		raw, err := ioutil.ReadFile(arg)

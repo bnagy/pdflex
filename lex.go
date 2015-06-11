@@ -168,6 +168,7 @@ func (l *Lexer) LineNumber() int {
 // back a nil pointer that will be the next state, terminating l.nextItem.
 func (l *Lexer) errorf(format string, args ...interface{}) stateFn {
 	l.items <- Item{ItemError, l.start, fmt.Sprintf(format, args...)}
+	l.items <- Item{ItemEOF, l.start, ""}
 	return nil
 }
 
@@ -237,10 +238,10 @@ func lexDefault(l *Lexer) stateFn {
 		return lexDefault
 	case r == ']':
 		l.arrayDepth--
+		l.emit(ItemRightArray)
 		if l.arrayDepth < 0 {
 			return l.errorf("unexexpected array terminator")
 		}
-		l.emit(ItemRightArray)
 		return lexDefault
 	case r == '%':
 		return lexComment
@@ -248,6 +249,8 @@ func lexDefault(l *Lexer) stateFn {
 		if l.peek() == '>' {
 			l.dictDepth--
 			if l.dictDepth < 0 {
+				l.next()
+				l.emit(ItemRightDict)
 				return l.errorf("unexexpected dict terminator")
 			}
 			l.backup()
@@ -373,19 +376,24 @@ func lexName(l *Lexer) stateFn {
 func lexStringObj(l *Lexer) stateFn {
 	balance := 1
 	for {
-		switch r := l.next(); {
-		case r == '\\':
+		r := l.next()
+
+		switch r {
+		case '\\':
 			// escaped parens don't count towards balance
-			l.accept("()")
-		case r == '(':
+			if !l.accept("\\") {
+				// two backslashes \x5c\x5c is an escaped \
+				l.accept("()")
+			}
+		case '(':
 			balance++
-		case r == ')':
+		case ')':
 			balance--
 			if balance <= 0 {
 				l.emit(ItemString)
 				return lexDefault
 			}
-		case r == eof:
+		case eof:
 			return l.errorf("unterminated string object")
 		default:
 		}
