@@ -82,7 +82,7 @@ var keytoks = map[string]ItemType{
 	"null":      ItemNull,
 }
 
-const eof = -1
+const lexEOF = -1
 
 // stateFn represents the state of the scanner as a function that returns the next state.
 type stateFn func(*Lexer) stateFn
@@ -110,7 +110,7 @@ func (l *Lexer) LastPos() Pos { return l.lastPos }
 func (l *Lexer) next() rune {
 	if int(l.pos) >= len(l.input) {
 		l.width = 0
-		return eof
+		return lexEOF
 	}
 	r, w := utf8.DecodeRuneInString(l.input[l.pos:])
 	l.width = Pos(w)
@@ -259,7 +259,7 @@ func lexDefault(l *Lexer) stateFn {
 		// '>' as part of a hex object should have been consumed in lexHex, so
 		// a stray '>' in this state is not valid.
 		fallthrough
-	case r == eof:
+	case r == lexEOF:
 		if l.arrayDepth > 0 {
 			return l.errorf("unterminated array")
 		}
@@ -326,7 +326,7 @@ func lexComment(l *Lexer) stateFn {
 	var r rune
 	for !isEndOfLine(l.peek()) {
 		r = l.next()
-		if r == eof {
+		if r == lexEOF {
 			l.emit(ItemComment)
 			return lexDefault
 		}
@@ -355,7 +355,7 @@ func lexRightDict(l *Lexer) stateFn {
 func lexName(l *Lexer) stateFn {
 	for {
 		switch r := l.next(); {
-		case isDelim(r) || unicode.IsSpace(r) || r == eof:
+		case isDelim(r) || unicode.IsSpace(r) || r == lexEOF:
 			l.backup()
 			l.emit(ItemName)
 			return lexDefault
@@ -393,7 +393,7 @@ func lexStringObj(l *Lexer) stateFn {
 				l.emit(ItemString)
 				return lexDefault
 			}
-		case eof:
+		case lexEOF:
 			return l.errorf("unterminated string object")
 		default:
 		}
@@ -412,7 +412,7 @@ func lexHexObj(l *Lexer) stateFn {
 		case r == '>':
 			l.emit(ItemHexString)
 			return lexDefault
-		case r == eof:
+		case r == lexEOF:
 			return l.errorf("unterminated hexstring")
 		default:
 			return l.errorf("illegal character in hexstring: %#U", r)
@@ -477,8 +477,8 @@ func (l *Lexer) scanNumber() bool {
 	if l.accept(".") {
 		l.acceptRun(digits)
 	}
-	// Next thing must be a delimeter, space char or eof
-	if isDelim(l.peek()) || unicode.IsSpace(l.peek()) || l.peek() == eof {
+	// Next thing must be a delimeter, space char or lexEOF
+	if isDelim(l.peek()) || unicode.IsSpace(l.peek()) || l.peek() == lexEOF {
 		return true
 	}
 	l.next()

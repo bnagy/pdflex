@@ -159,7 +159,7 @@ func shrink(in []byte, max int) ([]byte, error) {
 }
 
 func fix(in []byte) []byte {
-	p := Parser{Lexer: pdflex.NewLexer("", string(in))}
+	p := pdflex.Parser{Lexer: pdflex.NewLexer("", string(in))}
 	return p.FixXrefs()
 }
 

@@ -1,9 +1,8 @@
-package main
+package pdflex
 
 import (
 	"bytes"
 	"fmt"
-	"github.com/bnagy/pdflex"
 	"strconv"
 )
 
@@ -12,7 +11,7 @@ type parseState int
 const (
 	outside parseState = iota
 	inside
-	eof
+	parseEOF
 )
 
 // Spec: 7.5.5 - 7.5.6
@@ -40,7 +39,7 @@ type Parser struct {
 	Idx      int // Object Index of the current object
 	Offset   int // Header Section Offset
 	Entries  int // Number of object entries for this section
-	*pdflex.Lexer
+	*Lexer
 	State   parseState
 	Scratch bytes.Buffer
 }
@@ -58,15 +57,15 @@ type Row struct {
 // struct member which is a sanity check to verify when we think we're in the
 // middle of parsing an xrefs.
 func (p *Parser) MaybeFindXref() bool {
-	if p.State == eof {
+	if p.State == parseEOF {
 		return false
 	}
 	if p.State != outside {
 		panic("[BUG] MaybeFindXref() called while still in an xref")
 	}
-	for i := p.NextItem(); i.Typ != pdflex.ItemEOF; i = p.NextItem() {
+	for i := p.NextItem(); i.Typ != ItemEOF; i = p.NextItem() {
 		p.Scratch.WriteString(i.Val)
-		if i.Typ == pdflex.ItemXref {
+		if i.Typ == ItemXref {
 			p.State = inside
 			// FIXED - make sure to use the index of the xref in Scratch, not
 			// in the shrunk input buffer, because when you change the
@@ -76,7 +75,7 @@ func (p *Parser) MaybeFindXref() bool {
 			return true
 		}
 	}
-	p.State = eof
+	p.State = parseEOF
 	return false
 }
 
@@ -88,7 +87,7 @@ func (p *Parser) FindRow() (r Row, e error) {
 	// we have to abort
 	bailout := ""
 
-	i, ok := p.Accept(pdflex.ItemNumber, false)
+	i, ok := p.Accept(ItemNumber, false)
 
 	bailout += i.Val
 	if !ok || len(i.Val) != 10 {
@@ -104,7 +103,7 @@ func (p *Parser) FindRow() (r Row, e error) {
 		return
 	}
 
-	i, ok = p.Accept(pdflex.ItemSpace, false)
+	i, ok = p.Accept(ItemSpace, false)
 	bailout += i.Val
 	if !ok || len(i.Val) != 1 {
 		e = fmt.Errorf("corrupt row - want ItemSpace, got %#v", i)
@@ -112,7 +111,7 @@ func (p *Parser) FindRow() (r Row, e error) {
 		return
 	}
 
-	i, ok = p.Accept(pdflex.ItemNumber, false)
+	i, ok = p.Accept(ItemNumber, false)
 	bailout += i.Val
 	if !ok || len(i.Val) != 5 {
 		e = fmt.Errorf("corrupt row - want 5 digit generation, got %#v", i)
@@ -125,7 +124,7 @@ func (p *Parser) FindRow() (r Row, e error) {
 		return
 	}
 
-	i, ok = p.Accept(pdflex.ItemSpace, false)
+	i, ok = p.Accept(ItemSpace, false)
 	bailout += i.Val
 	if !ok || len(i.Val) != 1 {
 		e = fmt.Errorf("corrupt row - want ItemSpace, got %#v", i)
@@ -133,7 +132,7 @@ func (p *Parser) FindRow() (r Row, e error) {
 		return
 	}
 
-	i, ok = p.Accept(pdflex.ItemWord, false)
+	i, ok = p.Accept(ItemWord, false)
 	bailout += i.Val
 	if !ok || len(i.Val) != 1 || !(i.Val == "n" || i.Val == "f") {
 		e = fmt.Errorf("corrupt row - want [nf], got %#v", i)
@@ -149,13 +148,13 @@ func (p *Parser) FindRow() (r Row, e error) {
 // Accept is used to check the type of the next token, returning the token
 // itself and a match boolean. If write is true the token will be emitted to
 // scratch, whether or not the check matches.
-func (p *Parser) Accept(t pdflex.ItemType, write bool) (pdflex.Item, bool) {
+func (p *Parser) Accept(t ItemType, write bool) (Item, bool) {
 	i := p.NextItem()
 	if write {
 		p.Scratch.WriteString(i.Val)
 	}
-	if i.Typ == pdflex.ItemEOF {
-		p.State = eof
+	if i.Typ == ItemEOF {
+		p.State = parseEOF
 	}
 	return i, i.Typ == t
 
@@ -169,7 +168,7 @@ func (p *Parser) Accept(t pdflex.ItemType, write bool) (pdflex.Item, bool) {
 func (p *Parser) ResetToHere() {
 	// If we've reached EOF don't touch the state any more so that other
 	// functions can detect it and abort.
-	if p.State != eof {
+	if p.State != parseEOF {
 		p.State = outside
 	}
 	p.From = p.Scratch.Len() - 1
@@ -204,26 +203,26 @@ func (p *Parser) MaybeFindHeader() bool {
 	var err error
 
 	switch i.Typ {
-	case pdflex.ItemTrailer:
+	case ItemTrailer:
 		// no more headers in this section. Try to find and fix the startxref
 		// entry, and then reset to the outside state. Even if there is a
 		// missing %%EOF token we're not going to abort or anything...
 		for {
-			i, atEOF := p.Accept(pdflex.ItemEOF, true)
+			i, atEOF := p.Accept(ItemEOF, true)
 			if atEOF {
-				p.State = eof
+				p.State = parseEOF
 				return false
 			}
 
-			if i.Typ == pdflex.ItemStartXref {
-				if _, ok := p.Accept(pdflex.ItemEOL, true); !ok {
+			if i.Typ == ItemStartXref {
+				if _, ok := p.Accept(ItemEOL, true); !ok {
 					p.ResetToHere()
 					return false
 				}
 
 				// don't write in this call to Accept, we will write our
 				// own number
-				if i, ok := p.Accept(pdflex.ItemNumber, false); !ok {
+				if i, ok := p.Accept(ItemNumber, false); !ok {
 					p.Scratch.WriteString(i.Val)
 					p.ResetToHere()
 					return false
@@ -239,19 +238,19 @@ func (p *Parser) MaybeFindHeader() bool {
 			}
 		}
 
-	case pdflex.ItemNumber:
+	case ItemNumber:
 		p.Offset, err = strconv.Atoi(i.Val)
 		if err != nil {
 			p.ResetToHere()
 			return false
 		}
 
-		if _, ok := p.Accept(pdflex.ItemSpace, true); !ok {
+		if _, ok := p.Accept(ItemSpace, true); !ok {
 			p.ResetToHere()
 			return false
 		}
 
-		i, ok := p.Accept(pdflex.ItemNumber, true)
+		i, ok := p.Accept(ItemNumber, true)
 		if !ok {
 			p.ResetToHere()
 			return false
@@ -264,14 +263,14 @@ func (p *Parser) MaybeFindHeader() bool {
 
 		// Accept both 1 and 2 byte <EOL> as well as <SP><EOL>. Don't know if
 		// this is strictly per-spec, but it's common.
-		i, ok = p.Accept(pdflex.ItemEOL, true)
-		if !ok && i.Typ != pdflex.ItemSpace {
+		i, ok = p.Accept(ItemEOL, true)
+		if !ok && i.Typ != ItemSpace {
 			p.ResetToHere()
 			return false
 		}
-		if i.Typ == pdflex.ItemSpace {
+		if i.Typ == ItemSpace {
 			// not CRLF, but it was SP ...we must get <EOL> now
-			if _, ok := p.Accept(pdflex.ItemEOL, true); !ok {
+			if _, ok := p.Accept(ItemEOL, true); !ok {
 				p.ResetToHere()
 				return false
 			}
@@ -284,8 +283,8 @@ func (p *Parser) MaybeFindHeader() bool {
 
 		return true
 
-	case pdflex.ItemEOF:
-		p.State = eof
+	case ItemEOF:
+		p.State = parseEOF
 		return false
 	default:
 		// we assume that this was a truncated xref section or something, so
@@ -308,14 +307,14 @@ mainLoop:
 	for {
 		found := p.MaybeFindXref()
 		if !found {
-			if p.State != eof {
+			if p.State != parseEOF {
 				// just checking...
 				panic("[BUG] No xref found but not at EOF!")
 			}
 			return p.Scratch.Bytes()
 		}
 
-		if _, ok := p.Accept(pdflex.ItemEOL, true); !ok {
+		if _, ok := p.Accept(ItemEOL, true); !ok {
 			p.ResetToHere()
 			continue mainLoop
 		}
@@ -353,14 +352,14 @@ mainLoop:
 				// Correct line terminators are: SP CR, SP LF, or CRLF
 				// This makes a correct line exactly 20 bytes.
 				// Spec section 7.5.4 p 41
-				i, ok := p.Accept(pdflex.ItemEOL, true)
+				i, ok := p.Accept(ItemEOL, true)
 				if ok && len(i.Val) == 2 {
 					// CRLF - done with this line
 					continue entryLoop
 				}
-				if i.Typ == pdflex.ItemSpace && len(i.Val) == 1 {
+				if i.Typ == ItemSpace && len(i.Val) == 1 {
 					// not CRLF, but it was SP ...still OK if we get a linebreak now
-					if j, ok := p.Accept(pdflex.ItemEOL, true); ok && len(j.Val) == 1 {
+					if j, ok := p.Accept(ItemEOL, true); ok && len(j.Val) == 1 {
 						// single CR or LF - all is well. Strictly speaking we
 						// should only accept \r, not \n. Meh.
 						continue entryLoop
