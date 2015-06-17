@@ -314,7 +314,6 @@ mainLoop:
 			}
 			return p.Scratch.Bytes()
 		}
-		fmt.Printf("Found an xref")
 
 		if _, ok := p.Accept(pdflex.ItemEOL, true); !ok {
 			p.ResetToHere()
