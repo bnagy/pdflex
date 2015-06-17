@@ -314,6 +314,7 @@ mainLoop:
 			}
 			return p.Scratch.Bytes()
 		}
+		fmt.Printf("Found an xref")
 
 		if _, ok := p.Accept(pdflex.ItemEOL, true); !ok {
 			p.ResetToHere()
@@ -327,7 +328,6 @@ mainLoop:
 			}
 		entryLoop:
 			for i := 0; i < p.Entries; i++ {
-
 				row, err := p.FindRow()
 				if err != nil {
 					p.ResetToHere()

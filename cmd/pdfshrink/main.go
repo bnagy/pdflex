@@ -78,7 +78,6 @@ func re85(s string) (string, error) {
 }
 
 func shrink(in []byte, max int) ([]byte, error) {
-
 	l := pdflex.NewLexer("", string(in))
 	var out bytes.Buffer
 	zipped := false
