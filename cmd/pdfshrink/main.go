@@ -12,7 +12,9 @@ import (
 	"log"
 	"os"
 	"path"
+	"runtime"
 	"strings"
+	"sync"
 )
 
 var xref = []byte("xref")
@@ -22,8 +24,9 @@ var pref85 = "<~"
 var suff85 = "~>"
 
 var (
-	flagStrict = flag.Bool("strict", false, "Abort on xref parsing errors etc")
-	flagMax    = flag.Int("max", 128, "Trim streams whose size is greater than this value")
+	flagStrict  = flag.Bool("strict", false, "Abort on xref parsing errors etc")
+	flagMax     = flag.Int("max", 128, "Trim streams whose size is greater than this value")
+	flagWorkers = flag.Int("workers", 1, "Number of concurrent workers to use")
 )
 
 func inflate(s string) (string, error) {
@@ -163,39 +166,22 @@ func fix(in []byte) []byte {
 	return p.FixXrefs()
 }
 
-func main() {
-
-	flag.Usage = func() {
-		fmt.Fprintf(
-			os.Stderr,
-			"  Usage: %s file [file file ...]\n"+
-				"    -max=128: Trim streams whose size is greater than this value\n"+
-				"    -strict=false: Abort on xref parsing errors etc\n",
-			path.Base(os.Args[0]),
-		)
-	}
-
-	flag.Parse()
-	if *flagMax < 0 {
-		flag.Usage()
-		os.Exit(1)
-	}
-
-	for _, arg := range flag.Args() {
-
-		fmt.Fprintf(os.Stderr, "[SHRINKING] %s\n", arg)
+func shrinkWorker(in <-chan string, wg *sync.WaitGroup) {
+	defer wg.Done()
+	for arg := range in {
+		log.Printf("[SHRINKING] %s\n", arg)
 
 		// Read in
 		raw, err := ioutil.ReadFile(arg)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "[SKIPPED] %s - %s\n", arg, err)
+			log.Printf("[SKIPPED] %s - %s\n", arg, err)
 			continue
 		}
 
 		// Shrink
 		shrunk, err := shrink(raw, *flagMax)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "[SKIPPED] %s - strict mode: %s\n", arg, err)
+			log.Printf("[SKIPPED] %s - strict mode: %s\n", arg, err)
 			continue
 		}
 
@@ -207,8 +193,52 @@ func main() {
 		newfn = path.Join(path.Dir(arg), newfn)
 		err = ioutil.WriteFile(newfn, fixed, 0600)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "[SKIPPED] %s - %s", newfn, err)
+			log.Printf("[SKIPPED] %s - %s", newfn, err)
 		}
 	}
+}
+
+func main() {
+
+	flag.Usage = func() {
+		fmt.Fprintf(
+			os.Stderr,
+			"  Usage: %s file [file file ...]\n"+
+				"    -max=128: Trim streams whose size is greater than this value\n"+
+				"    -strict=false: Abort on xref parsing errors etc\n"+
+				"    -workers=1: Number of concurrent workers to use\n",
+			path.Base(os.Args[0]),
+		)
+	}
+
+	flag.Parse()
+	if *flagMax < 0 {
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	if *flagWorkers > runtime.NumCPU()*2 {
+		fmt.Fprintf(
+			os.Stderr,
+			"Maximum sensible workers is cores * 2 (%d). (You tried %d)\n",
+			runtime.NumCPU()*2,
+			*flagWorkers,
+		)
+	}
+
+	runtime.GOMAXPROCS(*flagWorkers)
+	wg := &sync.WaitGroup{}
+	work := make(chan string)
+	for i := 0; i < *flagWorkers; i++ {
+		wg.Add(1)
+		go shrinkWorker(work, wg)
+	}
+
+	for _, arg := range flag.Args() {
+		work <- arg
+	}
+	close(work)
+
+	wg.Wait()
 
 }
